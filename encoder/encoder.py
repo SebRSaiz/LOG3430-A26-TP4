@@ -70,17 +70,28 @@ def exec_convert(input_file, output_file, from_encoding: str, to_encoding: str) 
     to_encoding = to_encoding.strip().upper()
 
     if sys.platform == 'win32':
-        from_encoding = map_to_windows_encoding(from_encoding)
-        to_encoding = map_to_windows_encoding(to_encoding)
-        return subprocess.run(['powershell', '-Command',
-                               f'Get-Content "{input_file}" -Encoding {from_encoding} | Set-Content "{output_file}" -Encoding {to_encoding}'],
-                              check=True)
+        win_from = map_to_windows_encoding(from_encoding)
+        win_to = map_to_windows_encoding(to_encoding)
+        result = subprocess.run(['powershell', '-Command',
+                                 f'Get-Content "{input_file}" -Encoding {win_from} | Set-Content "{output_file}" -Encoding {win_to}'],
+                                check=True)
+        # Windows PowerShell 5.1 ajoute toujours un BOM en UTF-8 : on le retire
+        if to_encoding == UTF8:
+            with open(output_file, 'rb') as f:
+                data = f.read()
+            if data.startswith(b'\xef\xbb\xbf'):
+                with open(output_file, 'wb') as f:
+                    f.write(data[3:])
+        return result
     else:
-        return subprocess.run(['iconv',
-                               '--from-code', from_encoding,
-                               '--to-code', to_encoding,
-                               input_file,
-                               '--output', output_file], check=True)
+        # Options courtes POSIX (-f/-t) : compatibles avec iconv GNU (Linux) et BSD (macOS),
+        # qui ne connait pas --output -> on redirige la sortie standard vers le fichier
+        with open(output_file, 'wb') as out:
+            return subprocess.run(['iconv',
+                                   '-f', from_encoding,
+                                   '-t', to_encoding,
+                                   input_file],
+                                  stdout=out, check=True)
 
 
 def convert(input_file, output_file, from_encoding, to_encoding):
